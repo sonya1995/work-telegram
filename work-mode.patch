@@ -2603,10 +2603,10 @@ index 62f9f9a..56cd283 100644
    sessionData?: ApiSessionData;
 diff --git a/src/components/WorkApiSetup.module.scss b/src/components/WorkApiSetup.module.scss
 new file mode 100644
-index 0000000..ce67d7d
+index 0000000..ceb7145
 --- /dev/null
 +++ b/src/components/WorkApiSetup.module.scss
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,54 @@
 +.root {
 +  overflow-y: auto;
 +  display: flex;
@@ -2644,6 +2644,13 @@ index 0000000..ce67d7d
 +  color: var(--color-text-secondary);
 +}
 +
++.hint {
++  margin: 0.5rem 0 1rem;
++  font-size: 0.875rem;
++  line-height: 1.25rem;
++  color: var(--color-text-secondary);
++}
++
 +.error {
 +  margin-bottom: 1rem;
 +  font-size: 0.875rem;
@@ -2656,13 +2663,21 @@ index 0000000..ce67d7d
 +}
 diff --git a/src/components/WorkApiSetup.tsx b/src/components/WorkApiSetup.tsx
 new file mode 100644
-index 0000000..c87270c
+index 0000000..83234c4
 --- /dev/null
 +++ b/src/components/WorkApiSetup.tsx
-@@ -0,0 +1,76 @@
-+import { memo, useState } from '../lib/teact/teact';
+@@ -0,0 +1,122 @@
++import { memo, useLayoutEffect, useState } from '../lib/teact/teact';
 +
-+import { parseWorkApiCredentials, saveWorkApiCredentials } from '../util/workApiCredentials';
++import {
++  buildWorkAppUrl,
++  loadImportantUsernames,
++  loadWorkApiCredentials,
++  parseImportantUsernames,
++  parseWorkApiCredentials,
++  saveImportantUsernames,
++  saveWorkApiCredentials,
++} from '../util/workApiCredentials';
 +
 +import useLastCallback from '../hooks/useLastCallback';
 +
@@ -2673,12 +2688,22 @@ index 0000000..c87270c
 +
 +const MY_TELEGRAM_URL = 'https://my.telegram.org/apps';
 +const INVALID_CREDENTIALS_TEXT = 'Проверь ключи: api_id — только цифры, api_hash — 32 символа (цифры и буквы a–f)';
++const INVALID_USERNAMES_TEXT = 'Проверь ники: латинские буквы, цифры и _, через запятую, например @username';
 +
-+// Work mode: one-time setup of Telegram API credentials on this device
++// Work mode: setup of Telegram API credentials and always shown people on this device
 +const WorkApiSetup = () => {
-+  const [apiId, setApiId] = useState('');
-+  const [apiHash, setApiHash] = useState('');
++  const [initialCredentials] = useState(loadWorkApiCredentials);
++  const [apiId, setApiId] = useState(initialCredentials ? String(initialCredentials.apiId) : '');
++  const [apiHash, setApiHash] = useState(initialCredentials?.apiHash || '');
++  const [usernames, setUsernames] = useState(() => (
++    loadImportantUsernames().map((username) => `@${username}`).join(', ')
++  ));
 +  const [error, setError] = useState<string | undefined>();
++
++  // Lets the page transition from the previous screen finish, as `App` does
++  useLayoutEffect(() => {
++    document.documentElement.classList.remove('initial');
++  }, []);
 +
 +  const handleApiIdChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
 +    setApiId(e.target.value);
@@ -2687,6 +2712,11 @@ index 0000000..c87270c
 +
 +  const handleApiHashChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
 +    setApiHash(e.target.value);
++    setError(undefined);
++  });
++
++  const handleUsernamesChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
++    setUsernames(e.target.value);
 +    setError(undefined);
 +  });
 +
@@ -2699,8 +2729,19 @@ index 0000000..c87270c
 +      return;
 +    }
 +
++    const parsedUsernames = parseImportantUsernames(usernames);
++    if (!parsedUsernames) {
++      setError(INVALID_USERNAMES_TEXT);
++      return;
++    }
++
 +    saveWorkApiCredentials(credentials);
-+    window.location.reload();
++    saveImportantUsernames(parsedUsernames);
++    window.location.replace(buildWorkAppUrl());
++  });
++
++  const handleCancel = useLastCallback(() => {
++    window.location.replace(buildWorkAppUrl());
 +  });
 +
 +  return (
@@ -2713,7 +2754,7 @@ index 0000000..c87270c
 +          {' '}
 +          <a href={MY_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">my.telegram.org</a>
 +          {' '}
-+          (раздел API development tools). Они сохранятся только на этом устройстве.
++          (раздел API development tools). Всё, что здесь указано, хранится только на этом устройстве.
 +        </p>
 +        <InputText
 +          label="api_id"
@@ -2728,8 +2769,20 @@ index 0000000..c87270c
 +          autoComplete="off"
 +          onChange={handleApiHashChange}
 +        />
++        <p className={styles.hint}>
++          Чаты с этими людьми видны всегда, на вкладке «Важные». Можно оставить пустым.
++        </p>
++        <InputText
++          label="Всегда показывать: @ник, через запятую"
++          value={usernames}
++          autoComplete="off"
++          onChange={handleUsernamesChange}
++        />
 +        {error && <p className={styles.error}>{error}</p>}
 +        <Button type="submit" className={styles.button}>Сохранить</Button>
++        {initialCredentials && (
++          <Button className={styles.button} color="translucent" onClick={handleCancel}>Отмена</Button>
++        )}
 +      </form>
 +    </div>
 +  );
@@ -2737,7 +2790,7 @@ index 0000000..c87270c
 +
 +export default memo(WorkApiSetup);
 diff --git a/src/components/left/main/ChatFolders.tsx b/src/components/left/main/ChatFolders.tsx
-index b09976d..3c5aa69 100644
+index b09976d..badd453 100644
 --- a/src/components/left/main/ChatFolders.tsx
 +++ b/src/components/left/main/ChatFolders.tsx
 @@ -6,7 +6,6 @@ import type { GlobalState } from '../../../global/types';
@@ -2753,7 +2806,7 @@ index b09976d..3c5aa69 100644
  import { captureEvents, SwipeDirection } from '../../../util/captureEvents';
  import { resolveTransitionName } from '../../../util/resolveTransitionName';
 +import {
-+  NEW_CHATS_FOLDER_ID, WORK_MODE_NO_FOLDERS_TEXT, WORK_MODE_NO_FOLDERS_TITLE,
++  getIsSyntheticFolderId, WORK_MODE_NO_FOLDERS_TEXT, WORK_MODE_NO_FOLDERS_TITLE,
 +} from '../../../util/workMode';
  
  import useDerivedState from '../../../hooks/useDerivedState';
@@ -2802,7 +2855,7 @@ index b09976d..3c5aa69 100644
 -      .find(({ id }) => id === folderTabs![activeChatFolder].id);
 -    const isFolder = activeFolder && !isInAllChatsFolder;
 +    const activeTab = folderTabs?.[activeChatFolder] || folderTabs?.[FIRST_FOLDER_INDEX];
-+    const activeFolderId = activeTab && (activeTab.id === NEW_CHATS_FOLDER_ID || chatFoldersById[activeTab.id])
++    const activeFolderId = activeTab && (getIsSyntheticFolderId(activeTab.id) || chatFoldersById[activeTab.id])
 +      ? activeTab.id
 +      : undefined;
 +
@@ -2871,14 +2924,14 @@ index b09976d..3c5aa69 100644
    },
  )(ChatFolders));
 diff --git a/src/components/left/main/ChatList.tsx b/src/components/left/main/ChatList.tsx
-index a98c9a0..e093982 100644
+index a98c9a0..83588a5 100644
 --- a/src/components/left/main/ChatList.tsx
 +++ b/src/components/left/main/ChatList.tsx
 @@ -16,6 +16,7 @@ import {
  import { IS_APP, IS_MAC_OS } from '../../../util/browser/windowEnvironment';
  import buildClassName from '../../../util/buildClassName';
  import { getOrderKey, getPinnedChatsCount } from '../../../util/folderManager';
-+import { NEW_CHATS_FOLDER_ID } from '../../../util/workMode';
++import { getIsSyntheticFolderId } from '../../../util/workMode';
  import { ARCHIVE_ANIMATION_ID } from './hooks';
  
  import usePeerStoriesPolling from '../../../hooks/polling/usePeerStoriesPolling';
@@ -2887,8 +2940,8 @@ index a98c9a0..e093982 100644
            chatId={id}
            isPinned={isPinned}
 -          folderId={folderId}
-+          // Work mode: chats in the synthetic folder of new people act as in the main list
-+          folderId={folderId === NEW_CHATS_FOLDER_ID ? undefined : folderId}
++          // Work mode: chats in synthetic folders act as in the main list
++          folderId={getIsSyntheticFolderId(folderId) ? undefined : folderId}
            isSavedDialog={isSaved}
            animationType={getAnimationType(id)}
            orderDiff={orderDiffById[id]}
@@ -2962,7 +3015,7 @@ index cf77e8b..25f327b 100644
          {isCurrentUserPremium && <StatusButton />}
          {hasPasscode && (
 diff --git a/src/components/left/main/LeftSideMenuItems.tsx b/src/components/left/main/LeftSideMenuItems.tsx
-index 14f0499..5ca8f73 100644
+index 14f0499..75fb969 100644
 --- a/src/components/left/main/LeftSideMenuItems.tsx
 +++ b/src/components/left/main/LeftSideMenuItems.tsx
 @@ -1,4 +1,4 @@
@@ -2979,8 +3032,11 @@ index 14f0499..5ca8f73 100644
    BETA_CHANGELOG_URL,
    FEEDBACK_URL,
    IS_BETA,
-@@ -33,11 +32,9 @@ import { switchPermanentWebVersion } from '../../../util/permanentWebVersion';
+@@ -31,13 +30,12 @@ import { IS_MULTIACCOUNT_SUPPORTED, IS_TAURI } from '../../../util/browser/globa
+ import { getPromptInstall } from '../../../util/installPrompt';
+ import { switchPermanentWebVersion } from '../../../util/permanentWebVersion';
  import { getSystemTheme } from '../../../util/systemTheme';
++import { buildWorkSettingsUrl } from '../../../util/workApiCredentials';
  
  import useFlag from '../../../hooks/useFlag';
 -import { useFolderManagerForUnreadCounters } from '../../../hooks/useFolderManager';
@@ -2991,7 +3047,7 @@ index 14f0499..5ca8f73 100644
  import ConfirmDialog from '../../ui/ConfirmDialog';
  import MenuItem from '../../ui/MenuItem';
  import MenuSeparator from '../../ui/MenuSeparator';
-@@ -68,35 +65,23 @@ type StateProps = {
+@@ -68,35 +66,23 @@ type StateProps = {
    oldWalletBotId?: string;
  } & Pick<GlobalState, 'currentUserId' | 'archiveSettings'>;
  
@@ -3028,7 +3084,7 @@ index 14f0499..5ca8f73 100644
    } = getActions();
    const lang = useLang();
    const [isSwitchToWebKDialogOpen, openSwitchToWebKDialog, closeSwitchToWebKDialog] = useFlag();
-@@ -106,24 +91,6 @@ const LeftSideMenuItems = ({
+@@ -106,24 +92,6 @@ const LeftSideMenuItems = ({
  
    const withOtherVersions = !IS_TAURI && (window.location.hostname === PRODUCTION_HOSTNAME || IS_TEST);
  
@@ -3053,27 +3109,29 @@ index 14f0499..5ca8f73 100644
    const handleDarkModeToggle = useLastCallback((e: React.SyntheticEvent<HTMLElement>) => {
      e.stopPropagation();
      const newTheme = theme === 'light' ? 'dark' : 'light';
-@@ -167,10 +134,6 @@ const LeftSideMenuItems = ({
+@@ -167,8 +135,8 @@ const LeftSideMenuItems = ({
      openSettingsScreen({ screen: SettingsScreens.PasscodeTurnOff });
    });
  
 -  const handleOpenTipsChat = useLastCallback(() => {
 -    openChatByUsername({ username: lang('TelegramFeaturesUsername') });
--  });
--
-   const handleBugReportClick = useLastCallback(() => {
-     openUrl({ url: FEEDBACK_URL });
++  const handleOpenWorkSettings = useLastCallback(() => {
++    window.location.assign(buildWorkSettingsUrl());
    });
-@@ -188,54 +151,6 @@ const LeftSideMenuItems = ({
-           <MenuSeparator />
+ 
+   const handleBugReportClick = useLastCallback(() => {
+@@ -189,53 +157,11 @@ const LeftSideMenuItems = ({
          </>
        )}
--      <MenuItem
+       <MenuItem
 -        icon="user"
 -        onClick={handleSelectMyProfile}
--      >
++        icon="folder"
++        onClick={handleOpenWorkSettings}
+       >
 -        {lang('MenuMyProfile')}
--      </MenuItem>
++        Рабочий режим
+       </MenuItem>
 -      <MenuItem
 -        icon="saved-messages"
 -        onClick={handleSelectSaved}
@@ -3119,7 +3177,7 @@ index 14f0499..5ca8f73 100644
        <MenuItem
          icon="settings"
          onClick={onSelectSettings}
-@@ -267,12 +182,6 @@ const LeftSideMenuItems = ({
+@@ -267,12 +193,6 @@ const LeftSideMenuItems = ({
                <Toggle value={animationLevelValue} />
              </MenuItem>
              <MenuSeparator />
@@ -3438,18 +3496,20 @@ index 337ed95..7fe0514 100644
    let loadingChatId: string;
    let loadingThreadId: ThreadId;
 diff --git a/src/global/actions/api/initial.ts b/src/global/actions/api/initial.ts
-index 95a5e6d..8e5f201 100644
+index 95a5e6d..c8a0ad2 100644
 --- a/src/global/actions/api/initial.ts
 +++ b/src/global/actions/api/initial.ts
-@@ -40,6 +40,7 @@ import { clearWallpaperBlobs } from '../../../util/wallpaper/storage';
+@@ -40,6 +40,9 @@ import { clearWallpaperBlobs } from '../../../util/wallpaper/storage';
  import { interruptWebLogin, rejectWebLogin, resolveWebLogin } from '../../../util/webLogin';
  import { webLoginHandoffPromise } from '../../../util/webLoginHandoff';
  import { forceWebsync } from '../../../util/websync';
-+import { loadWorkApiCredentials, saveWorkApiCredentials } from '../../../util/workApiCredentials';
++import {
++  loadImportantUsernames, loadWorkApiCredentials, saveImportantUsernames, saveWorkApiCredentials,
++} from '../../../util/workApiCredentials';
  import {
    callApi, callApiLocal, closeApi, initApi, setShouldEnableDebugLog,
  } from '../../../api/gramjs';
-@@ -85,6 +86,9 @@ addActionHandler('initApi', async (global, actions): Promise<void> => {
+@@ -85,6 +88,9 @@ addActionHandler('initApi', async (global, actions): Promise<void> => {
        language,
      } = selectSharedSettings(global);
  
@@ -3459,7 +3519,7 @@ index 95a5e6d..8e5f201 100644
      const hasTestParam = request ? request.isTest : window.location.search.includes('test');
  
      const isTestServer = request?.isTest ?? global.config?.isTestServer ?? hasTestParam;
-@@ -95,6 +99,8 @@ addActionHandler('initApi', async (global, actions): Promise<void> => {
+@@ -95,6 +101,8 @@ addActionHandler('initApi', async (global, actions): Promise<void> => {
        .filter(Boolean);
  
      void initApi(actions.apiUpdate, {
@@ -3468,16 +3528,18 @@ index 95a5e6d..8e5f201 100644
        userAgent: navigator.userAgent,
        platform: PLATFORM_ENV,
        sessionData: loadStoredSession(),
-@@ -359,8 +365,12 @@ addActionHandler('signOutAllAccounts', async (): Promise<void> => {
+@@ -359,8 +367,14 @@ addActionHandler('signOutAllAccounts', async (): Promise<void> => {
    clearAllStoredSessions();
    await clearPasscodeStore().catch(() => undefined);
  
-+  // Work mode: signing out keeps the API credentials of this device
++  // Work mode: signing out keeps the settings of this device
 +  const workApiCredentials = loadWorkApiCredentials();
++  const importantUsernames = loadImportantUsernames();
 +
    try {
      localStorage.clear();
 +    if (workApiCredentials) saveWorkApiCredentials(workApiCredentials);
++    saveImportantUsernames(importantUsernames);
      await MAIN_IDB_STORE.clear();
      if ('caches' in window) {
        const cacheKeys = await caches.keys();
@@ -3595,16 +3657,21 @@ index e3c5a7c..68234c3 100644
    const forceUpdate = useForceUpdate();
  
 diff --git a/src/hooks/useFolderTabs.ts b/src/hooks/useFolderTabs.ts
-index 7623574..f44371a 100644
+index 7623574..7a291cf 100644
 --- a/src/hooks/useFolderTabs.ts
 +++ b/src/hooks/useFolderTabs.ts
-@@ -14,10 +14,16 @@ import { SettingsScreens } from '../types';
+@@ -14,10 +14,21 @@ import { SettingsScreens } from '../types';
  
  import { ALL_FOLDER_ID } from '../config';
  import { selectCanShareFolder } from '../global/selectors';
 -import { MEMO_EMPTY_ARRAY } from '../util/memo';
 +import {
-+  getIsWorkFolder, NEW_CHATS_FOLDER_ID, NEW_CHATS_FOLDER_TITLE,
++  getIsSyntheticFolderId,
++  getIsWorkFolder,
++  IMPORTANT_CHATS_FOLDER_ID,
++  IMPORTANT_CHATS_FOLDER_TITLE,
++  NEW_CHATS_FOLDER_ID,
++  NEW_CHATS_FOLDER_TITLE,
 +} from '../util/workMode';
  import { renderTextWithEntities } from '../components/common/helpers/renderTextWithEntities';
  import useAppLayout from './useAppLayout';
@@ -3617,7 +3684,7 @@ index 7623574..f44371a 100644
  import useLang from './useLang';
  import useLastCallback from './useLastCallback';
  
-@@ -43,6 +49,13 @@ type Params = {
+@@ -43,6 +54,20 @@ type Params = {
    isReadOnly: true;
  });
  
@@ -3628,10 +3695,17 @@ index 7623574..f44371a 100644
 +  excludedChatIds: [],
 +};
 +
++const IMPORTANT_CHATS_FOLDER: ApiChatFolder = {
++  id: IMPORTANT_CHATS_FOLDER_ID,
++  title: { text: IMPORTANT_CHATS_FOLDER_TITLE },
++  includedChatIds: [],
++  excludedChatIds: [],
++};
++
  const useFolderTabs = (params: Params) => {
    const {
      sidebarMode,
-@@ -72,27 +85,18 @@ const useFolderTabs = (params: Params) => {
+@@ -72,27 +97,23 @@ const useFolderTabs = (params: Params) => {
      setSharedSettingOption,
    } = getActions();
  
@@ -3645,8 +3719,9 @@ index 7623574..f44371a 100644
 -    } satisfies ApiChatFolder;
 -  }, [orderedFolderIds, lang]);
 -
-+  // Work mode: only work folders are shown, without the "All chats" tab. People who wrote for the first time
-+  // and are not sorted into any folder yet get their own tab at the end
++  // Work mode: only work folders are shown, without the "All chats" tab. Important people and people who wrote
++  // for the first time and are not sorted into any folder yet get their own tabs at the end
++  const hasImportantChats = Boolean(useFolderManagerForOrderedIds(IMPORTANT_CHATS_FOLDER_ID)?.length);
 +  const hasNewChats = Boolean(useFolderManagerForOrderedIds(NEW_CHATS_FOLDER_ID)?.length);
    const displayedFolders = useMemo(() => {
 -    return orderedFolderIds
@@ -3664,41 +3739,47 @@ index 7623574..f44371a 100644
 -      }).filter(Boolean)
 -      : undefined;
 -  }, [chatFoldersById, allChatsFolder, orderedFolderIds]);
-+    return hasNewChats ? [...workFolders, NEW_CHATS_FOLDER] : workFolders;
-+  }, [chatFoldersById, orderedFolderIds, hasNewChats]);
++    return [
++      ...workFolders,
++      ...(hasImportantChats ? [IMPORTANT_CHATS_FOLDER] : []),
++      ...(hasNewChats ? [NEW_CHATS_FOLDER] : []),
++    ];
++  }, [chatFoldersById, orderedFolderIds, hasImportantChats, hasNewChats]);
  
    const folderUnreadChatsCountersById = useFolderManagerForUnreadChatsByFolder();
    const handleReadAllChats = useLastCallback((folderId: number) => {
-@@ -112,11 +116,11 @@ const useFolderTabs = (params: Params) => {
+@@ -112,11 +133,11 @@ const useFolderTabs = (params: Params) => {
  
      return displayedFolders.map((folder, i) => {
        const { id, title } = folder;
 -      const isBlocked = id !== ALL_FOLDER_ID && i > maxFolders - 1;
-+      const isBlocked = id !== ALL_FOLDER_ID && id !== NEW_CHATS_FOLDER_ID && i > maxFolders - 1;
++      const isBlocked = id !== ALL_FOLDER_ID && !getIsSyntheticFolderId(id) && i > maxFolders - 1;
        const canShareFolder = selectCanShareFolder(getGlobal(), id);
        const contextActions: MenuItemContextAction[] = [];
  
 -      if (!isReadOnly) {
-+      if (!isReadOnly && id !== NEW_CHATS_FOLDER_ID) {
++      if (!isReadOnly && !getIsSyntheticFolderId(id)) {
          if (canShareFolder) {
            contextActions.push({
              title: lang('FilterShare'),
 diff --git a/src/index.tsx b/src/index.tsx
-index e41e6a4..7a62eca 100644
+index e41e6a4..1c9e867 100644
 --- a/src/index.tsx
 +++ b/src/index.tsx
-@@ -34,8 +34,10 @@ import { onBeforeUnload } from './util/schedulers';
+@@ -34,8 +34,12 @@ import { onBeforeUnload } from './util/schedulers';
  import initTauriApi from './util/tauri/initTauriApi';
  import setupTauriListeners from './util/tauri/setupTauriListeners';
  import updateWebmanifest from './util/updateWebmanifest';
-+import { loadWorkApiCredentials, resetWorkApiCredentialsIfRequested } from './util/workApiCredentials';
++import {
++  getIsWorkSettingsRequested, loadWorkApiCredentials, resetWorkApiCredentialsIfRequested,
++} from './util/workApiCredentials';
  
  import App from './components/App';
 +import WorkApiSetup from './components/WorkApiSetup';
  
  import './assets/fonts/roboto.css';
  import './styles/index.scss';
-@@ -103,8 +105,10 @@ async function init() {
+@@ -103,8 +107,10 @@ async function init() {
    requestMutation(() => {
      updateWebmanifest();
  
@@ -3706,7 +3787,7 @@ index e41e6a4..7a62eca 100644
 +
      TeactDOM.render(
 -      <App />,
-+      loadWorkApiCredentials() ? <App /> : <WorkApiSetup />,
++      loadWorkApiCredentials() && !getIsWorkSettingsRequested() ? <App /> : <WorkApiSetup />,
        document.getElementById('root')!,
      );
  
@@ -3754,21 +3835,22 @@ index 09b9649..91687e0 100644
    return navigator.locks.request(PUSH_DISPLAY_LOCK, async () => {
      const state = await readPushState();
 diff --git a/src/util/folderManager.ts b/src/util/folderManager.ts
-index df4f280..4ed2a42 100644
+index df4f280..70268a5 100644
 --- a/src/util/folderManager.ts
 +++ b/src/util/folderManager.ts
-@@ -27,6 +27,10 @@ import { areRecordsShallowEqual } from './areShallowEqual';
+@@ -27,6 +27,11 @@ import { areRecordsShallowEqual } from './areShallowEqual';
  import { createCallbackManager } from './callbacks';
  import { areSortedArraysEqual, unique } from './iteratees';
  import { throttle } from './schedulers';
++import { loadImportantUsernames } from './workApiCredentials';
 +import {
 +  getNewChatsBaseline, saveKnownChatIds, saveNewChatsBaseline, saveWorkChatIds,
 +} from './workChatIdsStorage';
-+import { getIsWorkFolder, NEW_CHATS_FOLDER_ID } from './workMode';
++import { getIsWorkFolder, IMPORTANT_CHATS_FOLDER_ID, NEW_CHATS_FOLDER_ID } from './workMode';
  
  interface FolderSummary {
    id: number;
-@@ -111,6 +115,8 @@ let results: {
+@@ -111,13 +116,18 @@ let results: {
      notificationsCount: number;
    } | undefined>;
    unreadChatIdsByFolderId: Record<string, string[] | undefined>;
@@ -3776,8 +3858,10 @@ index df4f280..4ed2a42 100644
 +  knownChatIds?: Set<string>;
  } = initials.results;
  
++let importantChatIdsCache: { usersById: Record<string, ApiUser>; chatIds: string[] } | undefined;
++
  let callbacks: {
-@@ -118,6 +124,7 @@ let callbacks: {
+   orderedIdsByFolderId: Record<number, CallbackManager>;
    chatsCountByFolderId: CallbackManager;
    unreadCountersByFolderId: CallbackManager;
    unreadChatIdsByFolderId: CallbackManager;
@@ -3785,7 +3869,7 @@ index df4f280..4ed2a42 100644
  } = initials.callbacks;
  
  if (DEBUG) {
-@@ -193,6 +200,16 @@ export function getChatFolderIds(chatId: string) {
+@@ -193,6 +203,16 @@ export function getChatFolderIds(chatId: string) {
    return prepared.folderIdsByChatId[chatId];
  }
  
@@ -3796,13 +3880,13 @@ index df4f280..4ed2a42 100644
 +}
 +
 +export function getIsWorkChat(chatId: string) {
-+  return getWorkChatIds().has(chatId) || getIsUnprocessedNewChat(chatId);
++  return getWorkChatIds().has(chatId) || getIsUnprocessedNewChat(chatId) || getIsImportantChat(chatId);
 +}
 +
  /* Callback managers */
  
  export function addOrderedIdsCallback(folderId: number, callback: (orderedIds: string[]) => void) {
-@@ -217,6 +234,10 @@ export function addUnreadCountersCallback(callback: (unreadCounters: typeof resu
+@@ -217,6 +237,10 @@ export function addUnreadCountersCallback(callback: (unreadCounters: typeof resu
    return callbacks.unreadCountersByFolderId.addCallback(callback);
  }
  
@@ -3813,7 +3897,7 @@ index df4f280..4ed2a42 100644
  /* Global update handlers */
  
  export function updateFolderManager(global: GlobalState) {
-@@ -828,14 +849,17 @@ function updateResults(affectedFolderIds: number[]) {
+@@ -828,14 +852,17 @@ function updateResults(affectedFolderIds: number[]) {
      results.chatsCountByFolderId[folderId] = newChatsCount;
  
      const communityMemberSummariesById = buildCommunityMemberSummariesById(folderId, newOrderedIds);
@@ -3838,7 +3922,7 @@ index df4f280..4ed2a42 100644
  
      const currentUnreadChats = results.unreadChatIdsByFolderId[folderId];
      const newUnreadChats = buildFolderByUnreadChats(newOrderedIds, communityMemberSummariesById);
-@@ -847,6 +871,48 @@ function updateResults(affectedFolderIds: number[]) {
+@@ -847,6 +874,42 @@ function updateResults(affectedFolderIds: number[]) {
      results.unreadChatIdsByFolderId[folderId] = newUnreadChats;
    });
  
@@ -3846,27 +3930,21 @@ index df4f280..4ed2a42 100644
 +  updateKnownChatIds();
 +
 +  const newChatIds = buildNewChatIds();
-+  const currentNewChatIds = results.orderedIdsByFolderId[NEW_CHATS_FOLDER_ID];
-+  if (!currentNewChatIds || !areSortedArraysEqual(newChatIds, currentNewChatIds)) {
-+    results.orderedIdsByFolderId[NEW_CHATS_FOLDER_ID] = newChatIds;
-+    results.pinnedCountByFolderId[NEW_CHATS_FOLDER_ID] = 0;
-+    callbacks.orderedIdsByFolderId[NEW_CHATS_FOLDER_ID]?.runCallbacks(newChatIds);
-+  }
++  const importantChatIds = buildImportantChatIds();
++  const displayedImportantChatIds = importantChatIds
++    .filter((chatId) => prepared.chatSummariesById.has(chatId))
++    .sort((chatId1, chatId2) => getOrderKey(chatId2) - getOrderKey(chatId1));
 +
-+  if (results.chatsCountByFolderId[NEW_CHATS_FOLDER_ID] !== newChatIds.length) {
-+    wasChatsCountChanged = true;
-+    results.chatsCountByFolderId[NEW_CHATS_FOLDER_ID] = newChatIds.length;
-+  }
++  [
++    [NEW_CHATS_FOLDER_ID, newChatIds],
++    [IMPORTANT_CHATS_FOLDER_ID, displayedImportantChatIds],
++  ].forEach(([folderId, orderedIds]) => {
++    const changes = updateSyntheticFolderResults(folderId as number, orderedIds as string[]);
++    wasChatsCountChanged ||= changes.wasChatsCountChanged;
++    wasUnreadCountersChanged ||= changes.wasUnreadCountersChanged;
++  });
 +
-+  const currentNewChatsUnreadCounters = results.unreadCountersByFolderId[NEW_CHATS_FOLDER_ID];
-+  const newNewChatsUnreadCounters = buildFolderUnreadCounters(newChatIds);
-+  if (!currentNewChatsUnreadCounters
-+    || !areRecordsShallowEqual(newNewChatsUnreadCounters, currentNewChatsUnreadCounters)) {
-+    wasUnreadCountersChanged = true;
-+    results.unreadCountersByFolderId[NEW_CHATS_FOLDER_ID] = newNewChatsUnreadCounters;
-+  }
-+
-+  const newWorkChatIds = buildWorkChatIds(newChatIds);
++  const newWorkChatIds = buildWorkChatIds([...newChatIds, ...importantChatIds]);
 +  const isWorkChatIdsChanged = !areSetsEqual(newWorkChatIds, results.workChatIds);
 +  if (isWorkChatIdsChanged) {
 +    results.workChatIds = newWorkChatIds;
@@ -3887,12 +3965,12 @@ index df4f280..4ed2a42 100644
    if (wasChatsCountChanged) {
      // We need to update the entire object as it will be returned from a hook
      const newValue = { ...results.chatsCountByFolderId };
-@@ -959,6 +1025,94 @@ function buildFolderByUnreadChats(
+@@ -959,6 +1022,149 @@ function buildFolderByUnreadChats(
    }, []);
  }
  
-+function buildWorkChatIds(newChatIds: string[]) {
-+  const workChatIds = new Set<string>(newChatIds);
++function buildWorkChatIds(extraChatIds: string[]) {
++  const workChatIds = new Set<string>(extraChatIds);
 +
 +  Object.values(prevGlobal.foldersById).forEach((folder) => {
 +    if (!getIsWorkFolder(folder)) return;
@@ -3903,6 +3981,61 @@ index df4f280..4ed2a42 100644
 +  });
 +
 +  return workChatIds;
++}
++
++// Synthetic folders are lists built here, without a folder on the server
++function updateSyntheticFolderResults(folderId: number, orderedIds: string[]) {
++  let wasChatsCountChanged = false;
++  let wasUnreadCountersChanged = false;
++
++  const currentOrderedIds = results.orderedIdsByFolderId[folderId];
++  if (!currentOrderedIds || !areSortedArraysEqual(orderedIds, currentOrderedIds)) {
++    results.orderedIdsByFolderId[folderId] = orderedIds;
++    results.pinnedCountByFolderId[folderId] = 0;
++    callbacks.orderedIdsByFolderId[folderId]?.runCallbacks(orderedIds);
++  }
++
++  if (results.chatsCountByFolderId[folderId] !== orderedIds.length) {
++    wasChatsCountChanged = true;
++    results.chatsCountByFolderId[folderId] = orderedIds.length;
++  }
++
++  const currentUnreadCounters = results.unreadCountersByFolderId[folderId];
++  const newUnreadCounters = buildFolderUnreadCounters(orderedIds);
++  if (!currentUnreadCounters || !areRecordsShallowEqual(newUnreadCounters, currentUnreadCounters)) {
++    wasUnreadCountersChanged = true;
++    results.unreadCountersByFolderId[folderId] = newUnreadCounters;
++  }
++
++  return { wasChatsCountChanged, wasUnreadCountersChanged };
++}
++
++// People chosen on this device by username
++function buildImportantChatIds() {
++  const usernames = loadImportantUsernames();
++  if (!usernames.length) return [];
++
++  const usersById = prevGlobal.usersById;
++  if (importantChatIdsCache?.usersById === usersById) return importantChatIdsCache.chatIds;
++
++  const chatIds = Object.values(usersById)
++    .filter((user) => getIsImportantUser(user, usernames))
++    .map(({ id }) => id);
++  importantChatIdsCache = { usersById, chatIds };
++
++  return chatIds;
++}
++
++function getIsImportantChat(chatId: string) {
++  const usernames = loadImportantUsernames();
++  if (!usernames.length) return false;
++
++  const user = getGlobal().users.byId[chatId];
++  return Boolean(user && getIsImportantUser(user, usernames));
++}
++
++function getIsImportantUser(user: ApiUser, usernames: string[]) {
++  return Boolean(user.usernames?.some(({ username }) => usernames.includes(username.toLowerCase())));
 +}
 +
 +function updateNewChatsBaseline() {
@@ -3982,7 +4115,7 @@ index df4f280..4ed2a42 100644
  function buildCommunityMemberSummariesById(folderId: number, orderedIds: string[]) {
    if (folderId !== ALL_FOLDER_ID && folderId !== ARCHIVED_FOLDER_ID) return undefined;
  
-@@ -1003,6 +1157,7 @@ function buildInitials() {
+@@ -1003,6 +1209,7 @@ function buildInitials() {
        chatsCountByFolderId: {},
        unreadCountersByFolderId: {},
        unreadChatIdsByFolderId: {},
@@ -3990,13 +4123,19 @@ index df4f280..4ed2a42 100644
      },
  
      callbacks: {
-@@ -1010,6 +1165,7 @@ function buildInitials() {
+@@ -1010,6 +1217,7 @@ function buildInitials() {
        chatsCountByFolderId: createCallbackManager(),
        unreadCountersByFolderId: createCallbackManager(),
        unreadChatIdsByFolderId: createCallbackManager(),
 +      workChatIds: createCallbackManager(),
      },
    };
+ }
+@@ -1021,4 +1229,5 @@ function reset() {
+   prepared = newInitials.prepared;
+   results = newInitials.results;
+   callbacks = newInitials.callbacks;
++  importantChatIdsCache = undefined;
  }
 diff --git a/src/util/notifications.tsx b/src/util/notifications.tsx
 index 751ee39..ee291e3 100644
@@ -4023,25 +4162,31 @@ index 751ee39..ee291e3 100644
    // On touch devices show notifications when chat is not active
 diff --git a/src/util/workApiCredentials.ts b/src/util/workApiCredentials.ts
 new file mode 100644
-index 0000000..0915ab7
+index 0000000..aa6c299
 --- /dev/null
 +++ b/src/util/workApiCredentials.ts
-@@ -0,0 +1,50 @@
-+// Work mode: Telegram API credentials are entered on each device and stay in its local storage,
-+// so they are never part of the published build
-+const STORAGE_KEY = 'tt-work-api-credentials';
+@@ -0,0 +1,104 @@
++// Work mode: Telegram API credentials and the people who are always shown are set on each device and stay
++// in its local storage, so they are never part of the published build
++const CREDENTIALS_STORAGE_KEY = 'tt-work-api-credentials';
++const IMPORTANT_USERNAMES_STORAGE_KEY = 'tt-work-important-usernames';
 +const RESET_QUERY = 'reset-keys';
++const SETTINGS_QUERY = 'work-settings';
 +const API_ID_REGEX = /^\d{3,12}$/;
 +const API_HASH_REGEX = /^[0-9a-f]{32}$/i;
++const USERNAME_REGEX = /^[a-z0-9_]{3,32}$/;
++const USERNAME_SEPARATOR_REGEX = /[\s,;]+/;
 +
 +export type WorkApiCredentials = {
 +  apiId: number;
 +  apiHash: string;
 +};
 +
++let importantUsernames: string[] | undefined;
++
 +export function loadWorkApiCredentials(): WorkApiCredentials | undefined {
 +  try {
-+    const value = localStorage.getItem(STORAGE_KEY);
++    const value = localStorage.getItem(CREDENTIALS_STORAGE_KEY);
 +    if (!value) return undefined;
 +
 +    const { apiId, apiHash } = JSON.parse(value) as Partial<WorkApiCredentials>;
@@ -4052,7 +4197,7 @@ index 0000000..0915ab7
 +}
 +
 +export function saveWorkApiCredentials(credentials: WorkApiCredentials) {
-+  localStorage.setItem(STORAGE_KEY, JSON.stringify(credentials));
++  localStorage.setItem(CREDENTIALS_STORAGE_KEY, JSON.stringify(credentials));
 +}
 +
 +export function parseWorkApiCredentials(apiIdText: string, apiHashText: string): WorkApiCredentials | undefined {
@@ -4063,13 +4208,61 @@ index 0000000..0915ab7
 +  return { apiId: Number(apiId), apiHash: apiHash.toLowerCase() };
 +}
 +
++// Usernames are kept lowercase and without `@`
++export function loadImportantUsernames() {
++  if (importantUsernames) return importantUsernames;
++
++  try {
++    const value = localStorage.getItem(IMPORTANT_USERNAMES_STORAGE_KEY);
++    importantUsernames = value ? (JSON.parse(value) as string[]) : [];
++  } catch {
++    importantUsernames = [];
++  }
++
++  return importantUsernames;
++}
++
++export function saveImportantUsernames(usernames: string[]) {
++  importantUsernames = usernames;
++  localStorage.setItem(IMPORTANT_USERNAMES_STORAGE_KEY, JSON.stringify(usernames));
++}
++
++export function parseImportantUsernames(text: string): string[] | undefined {
++  const usernames = text.split(USERNAME_SEPARATOR_REGEX)
++    .map((username) => username.replace(/^@/, '').toLowerCase())
++    .filter(Boolean);
++  if (usernames.some((username) => !USERNAME_REGEX.test(username))) return undefined;
++
++  return Array.from(new Set(usernames));
++}
++
++export function getIsWorkSettingsRequested() {
++  return new URL(window.location.href).searchParams.has(SETTINGS_QUERY);
++}
++
++export function buildWorkSettingsUrl() {
++  const url = new URL(window.location.href);
++  url.search = `?${SETTINGS_QUERY}`;
++  url.hash = '';
++
++  return url.href;
++}
++
++export function buildWorkAppUrl() {
++  const url = new URL(window.location.href);
++  url.search = '';
++  url.hash = '';
++
++  return url.href;
++}
++
 +// Opening the app with `?reset-keys` asks for new credentials
 +export function resetWorkApiCredentialsIfRequested() {
 +  const url = new URL(window.location.href);
 +  if (!url.searchParams.has(RESET_QUERY)) return;
 +
 +  try {
-+    localStorage.removeItem(STORAGE_KEY);
++    localStorage.removeItem(CREDENTIALS_STORAGE_KEY);
 +  } catch {
 +    // Storage can be unavailable, then there is nothing to reset
 +  }
@@ -4135,10 +4328,10 @@ index 0000000..eb319dc
 +}
 diff --git a/src/util/workMode.ts b/src/util/workMode.ts
 new file mode 100644
-index 0000000..522340d
+index 0000000..204bd89
 --- /dev/null
 +++ b/src/util/workMode.ts
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,38 @@
 +import type { ApiChatFolder } from '../api/types';
 +
 +// Work mode: the client shows only chats from work folders. A folder counts as a work folder when its title
@@ -4154,10 +4347,16 @@ index 0000000..522340d
 +// A synthetic folder with people who wrote for the first time and are not sorted into any folder yet
 +export const NEW_CHATS_FOLDER_ID = -100;
 +export const NEW_CHATS_FOLDER_TITLE = 'Новые';
-+export const WORK_MODE_BLOCKED_CHAT_TEXT = 'Это не рабочий чат. Здесь открываются только рабочие папки '
-+  + 'и те, кто написал впервые';
++// A synthetic folder with people chosen on this device, always shown in work mode
++export const IMPORTANT_CHATS_FOLDER_ID = -101;
++export const IMPORTANT_CHATS_FOLDER_TITLE = 'Важные';
++export const WORK_MODE_BLOCKED_CHAT_TEXT = 'Это не рабочий чат, он открывается только в обычном Telegram';
 +export const WORK_MODE_NO_FOLDERS_TITLE = 'Рабочих папок пока нет';
 +export const WORK_MODE_NO_FOLDERS_TEXT = 'Добавь 💼 в название рабочей папки в Telegram, и её чаты появятся здесь';
++
++export function getIsSyntheticFolderId(folderId?: number) {
++  return folderId === NEW_CHATS_FOLDER_ID || folderId === IMPORTANT_CHATS_FOLDER_ID;
++}
 +
 +export function getIsWorkFolder(folder: Pick<ApiChatFolder, 'title' | 'emoticon'>) {
 +  if (folder.emoticon === WORK_FOLDER_MARKER) return true;
