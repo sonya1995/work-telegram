@@ -2,8 +2,10 @@
 # Builds the work-mode Telegram web client into ./site
 #
 # Needs Node.js 24+ and npm 11+. Usage:
-#   TELEGRAM_API_ID=123 TELEGRAM_API_HASH=abc ./build.sh
+#   ./build.sh
 # Optional: WORK_FOLDERS="Работа,Проекты" (folders with 💼 in the title count as work folders anyway)
+#
+# The build has no Telegram API keys: each device asks for them once and keeps them locally
 set -euo pipefail
 
 UPSTREAM_REPO=https://github.com/Ajaxy/telegram-tt.git
@@ -13,8 +15,6 @@ OPUS_RECORDER_COMMIT=116830a94120baad5ac60ac060c2ecd032b6107b
 # Telegram's public Web Push key, the same one web.telegram.org uses
 TELEGRAM_VAPID_KEY=BHEbKOXt-GD8MCTTYiAYT3I5R4MB0epIE7Tbbymj1uR0xJRE_7m27eXTVAC_P19TeZnO9413lRz-0oZ87JRPKPM
 
-: "${TELEGRAM_API_ID:?Set TELEGRAM_API_ID from my.telegram.org}"
-: "${TELEGRAM_API_HASH:?Set TELEGRAM_API_HASH from my.telegram.org}"
 BASE_URL="${BASE_URL:-https://sonya1995.github.io/work-telegram/}"
 WORK_FOLDERS="${WORK_FOLDERS:-}"
 
@@ -37,8 +37,8 @@ npm pkg set "dependencies.opus-recorder=file:$BUILD_DIR/opus-recorder-8.0.3.tgz"
 
 npm install --no-audit --no-fund
 
-TELEGRAM_API_ID="$TELEGRAM_API_ID" \
-TELEGRAM_API_HASH="$TELEGRAM_API_HASH" \
+TELEGRAM_API_ID= \
+TELEGRAM_API_HASH= \
 BASE_URL="$BASE_URL" \
 WORK_FOLDERS="$WORK_FOLDERS" \
 VAPID_KEY="$TELEGRAM_VAPID_KEY" \

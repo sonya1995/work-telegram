@@ -2538,6 +2538,204 @@ index 15e740f..4f9cc05 100644
  }
  
  declare namespace React {
+diff --git a/src/api/gramjs/methods/client.ts b/src/api/gramjs/methods/client.ts
+index 403ef1c..abdcb00 100644
+--- a/src/api/gramjs/methods/client.ts
++++ b/src/api/gramjs/methods/client.ts
+@@ -93,6 +93,9 @@ const ABORT_CONTROLLERS = new Map<string, AbortController>();
+ 
+ let client: TelegramClient;
+ let currentUserId: string | undefined;
++// Work mode: the credentials come from the device, the build-time ones are only a fallback
++let apiId = TELEGRAM_API_ID;
++let apiHash = TELEGRAM_API_HASH;
+ 
+ export function setLanguageCode({ langCode }: { langCode: string }) {
+   return client.setLanguageCode(langCode);
+@@ -105,19 +108,25 @@ export async function init(initialArgs: ApiInitialArgs, onConnected?: NoneToVoid
+   }
+ 
+   const {
++    apiId: initialApiId, apiHash: initialApiHash,
+     userAgent, platform, sessionData, isWebmSupported, maxBufferSize, webAuthToken, dcId,
+     shouldForceHttpTransport, shouldAllowHttpTransport,
+     shouldDebugExportedSenders, langCode, isTestServerRequested, accountIds,
+     hasPasskeySupport, webAuthUserId,
+   } = initialArgs;
+ 
++  if (initialApiId && initialApiHash) {
++    apiId = initialApiId;
++    apiHash = initialApiHash;
++  }
++
+   const session = new sessions.CallbackSession(sessionData, onSessionUpdate);
+ 
+   (self as any).isWebmSupported = isWebmSupported;
+ 
+   (self as any).maxBufferSize = maxBufferSize;
+ 
+-  client = new TelegramClient(session, TELEGRAM_API_ID, TELEGRAM_API_HASH, {
++  client = new TelegramClient(session, apiId, apiHash, {
+     deviceModel: navigator.userAgent || userAgent || DEFAULT_USER_AGENT,
+     systemVersion: platform || DEFAULT_PLATFORM,
+     appVersion: `${APP_VERSION} ${APP_CODE_NAME}`,
+@@ -226,7 +235,7 @@ export async function invokeWithAccount<T extends GramJs.AnyRequest>(
+   connection?: ApiAccountConnection,
+ ): Promise<T['__response'] | false | undefined> {
+   const accountClient = connection ? new TelegramClient(
+-    new sessions.CallbackSession(connection.sessionData, () => undefined), TELEGRAM_API_ID, TELEGRAM_API_HASH,
++    new sessions.CallbackSession(connection.sessionData, () => undefined), apiId, apiHash,
+     {
+       deviceModel: navigator.userAgent || DEFAULT_USER_AGENT,
+       systemVersion: connection.platform || DEFAULT_PLATFORM,
+diff --git a/src/api/types/misc.ts b/src/api/types/misc.ts
+index 62f9f9a..56cd283 100644
+--- a/src/api/types/misc.ts
++++ b/src/api/types/misc.ts
+@@ -18,6 +18,8 @@ import type { ApiStarsSubscriptionPricing } from './stars';
+ import type { ApiUser } from './users';
+ 
+ export interface ApiInitialArgs {
++  apiId?: number;
++  apiHash?: string;
+   userAgent: string;
+   platform?: string;
+   sessionData?: ApiSessionData;
+diff --git a/src/components/WorkApiSetup.module.scss b/src/components/WorkApiSetup.module.scss
+new file mode 100644
+index 0000000..ce67d7d
+--- /dev/null
++++ b/src/components/WorkApiSetup.module.scss
+@@ -0,0 +1,47 @@
++.root {
++  overflow-y: auto;
++  display: flex;
++  justify-content: center;
++
++  height: 100%;
++  padding: 3rem 1.5rem;
++
++  background: var(--color-background);
++}
++
++.form {
++  width: 100%;
++  max-width: 22.5rem;
++  text-align: center;
++}
++
++.logo {
++  width: 6rem;
++  height: 6rem;
++  margin-bottom: 1.5rem;
++}
++
++.title {
++  margin-bottom: 0.75rem;
++  font-size: 1.5rem;
++  font-weight: var(--font-weight-semibold);
++  color: var(--color-text);
++}
++
++.text {
++  margin-bottom: 2rem;
++  font-size: 0.9375rem;
++  line-height: 1.375rem;
++  color: var(--color-text-secondary);
++}
++
++.error {
++  margin-bottom: 1rem;
++  font-size: 0.875rem;
++  line-height: 1.25rem;
++  color: var(--color-error);
++}
++
++.button {
++  margin-top: 0.5rem;
++}
+diff --git a/src/components/WorkApiSetup.tsx b/src/components/WorkApiSetup.tsx
+new file mode 100644
+index 0000000..c87270c
+--- /dev/null
++++ b/src/components/WorkApiSetup.tsx
+@@ -0,0 +1,76 @@
++import { memo, useState } from '../lib/teact/teact';
++
++import { parseWorkApiCredentials, saveWorkApiCredentials } from '../util/workApiCredentials';
++
++import useLastCallback from '../hooks/useLastCallback';
++
++import Button from './ui/Button';
++import InputText from './ui/InputText';
++
++import styles from './WorkApiSetup.module.scss';
++
++const MY_TELEGRAM_URL = 'https://my.telegram.org/apps';
++const INVALID_CREDENTIALS_TEXT = 'Проверь ключи: api_id — только цифры, api_hash — 32 символа (цифры и буквы a–f)';
++
++// Work mode: one-time setup of Telegram API credentials on this device
++const WorkApiSetup = () => {
++  const [apiId, setApiId] = useState('');
++  const [apiHash, setApiHash] = useState('');
++  const [error, setError] = useState<string | undefined>();
++
++  const handleApiIdChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
++    setApiId(e.target.value);
++    setError(undefined);
++  });
++
++  const handleApiHashChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
++    setApiHash(e.target.value);
++    setError(undefined);
++  });
++
++  const handleSubmit = useLastCallback((e: React.FormEvent) => {
++    e.preventDefault();
++
++    const credentials = parseWorkApiCredentials(apiId, apiHash);
++    if (!credentials) {
++      setError(INVALID_CREDENTIALS_TEXT);
++      return;
++    }
++
++    saveWorkApiCredentials(credentials);
++    window.location.reload();
++  });
++
++  return (
++    <div className={styles.root}>
++      <form className={styles.form} onSubmit={handleSubmit}>
++        <img className={styles.logo} src="./icon-192x192.png" alt="" />
++        <h1 className={styles.title}>Рабочий Telegram</h1>
++        <p className={styles.text}>
++          Вставь ключи приложения с
++          {' '}
++          <a href={MY_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">my.telegram.org</a>
++          {' '}
++          (раздел API development tools). Они сохранятся только на этом устройстве.
++        </p>
++        <InputText
++          label="api_id"
++          value={apiId}
++          inputMode="numeric"
++          autoComplete="off"
++          onChange={handleApiIdChange}
++        />
++        <InputText
++          label="api_hash"
++          value={apiHash}
++          autoComplete="off"
++          onChange={handleApiHashChange}
++        />
++        {error && <p className={styles.error}>{error}</p>}
++        <Button type="submit" className={styles.button}>Сохранить</Button>
++      </form>
++    </div>
++  );
++};
++
++export default memo(WorkApiSetup);
 diff --git a/src/components/left/main/ChatFolders.tsx b/src/components/left/main/ChatFolders.tsx
 index b09976d..04fe69f 100644
 --- a/src/components/left/main/ChatFolders.tsx
@@ -3213,6 +3411,50 @@ index 337ed95..7fe0514 100644
    let threadId: ThreadId | undefined;
    let loadingChatId: string;
    let loadingThreadId: ThreadId;
+diff --git a/src/global/actions/api/initial.ts b/src/global/actions/api/initial.ts
+index 95a5e6d..8e5f201 100644
+--- a/src/global/actions/api/initial.ts
++++ b/src/global/actions/api/initial.ts
+@@ -40,6 +40,7 @@ import { clearWallpaperBlobs } from '../../../util/wallpaper/storage';
+ import { interruptWebLogin, rejectWebLogin, resolveWebLogin } from '../../../util/webLogin';
+ import { webLoginHandoffPromise } from '../../../util/webLoginHandoff';
+ import { forceWebsync } from '../../../util/websync';
++import { loadWorkApiCredentials, saveWorkApiCredentials } from '../../../util/workApiCredentials';
+ import {
+   callApi, callApiLocal, closeApi, initApi, setShouldEnableDebugLog,
+ } from '../../../api/gramjs';
+@@ -85,6 +86,9 @@ addActionHandler('initApi', async (global, actions): Promise<void> => {
+       language,
+     } = selectSharedSettings(global);
+ 
++    const workApiCredentials = loadWorkApiCredentials();
++    if (!workApiCredentials) return;
++
+     const hasTestParam = request ? request.isTest : window.location.search.includes('test');
+ 
+     const isTestServer = request?.isTest ?? global.config?.isTestServer ?? hasTestParam;
+@@ -95,6 +99,8 @@ addActionHandler('initApi', async (global, actions): Promise<void> => {
+       .filter(Boolean);
+ 
+     void initApi(actions.apiUpdate, {
++      apiId: workApiCredentials.apiId,
++      apiHash: workApiCredentials.apiHash,
+       userAgent: navigator.userAgent,
+       platform: PLATFORM_ENV,
+       sessionData: loadStoredSession(),
+@@ -359,8 +365,12 @@ addActionHandler('signOutAllAccounts', async (): Promise<void> => {
+   clearAllStoredSessions();
+   await clearPasscodeStore().catch(() => undefined);
+ 
++  // Work mode: signing out keeps the API credentials of this device
++  const workApiCredentials = loadWorkApiCredentials();
++
+   try {
+     localStorage.clear();
++    if (workApiCredentials) saveWorkApiCredentials(workApiCredentials);
+     await MAIN_IDB_STORE.clear();
+     if ('caches' in window) {
+       const cacheKeys = await caches.keys();
 diff --git a/src/global/actions/apiUpdaters/calls.ts b/src/global/actions/apiUpdaters/calls.ts
 index 5d8df9c..cd20cde 100644
 --- a/src/global/actions/apiUpdaters/calls.ts
@@ -3372,6 +3614,33 @@ index 7623574..bb47b28 100644
  
    const folderUnreadChatsCountersById = useFolderManagerForUnreadChatsByFolder();
    const handleReadAllChats = useLastCallback((folderId: number) => {
+diff --git a/src/index.tsx b/src/index.tsx
+index e41e6a4..7a62eca 100644
+--- a/src/index.tsx
++++ b/src/index.tsx
+@@ -34,8 +34,10 @@ import { onBeforeUnload } from './util/schedulers';
+ import initTauriApi from './util/tauri/initTauriApi';
+ import setupTauriListeners from './util/tauri/setupTauriListeners';
+ import updateWebmanifest from './util/updateWebmanifest';
++import { loadWorkApiCredentials, resetWorkApiCredentialsIfRequested } from './util/workApiCredentials';
+ 
+ import App from './components/App';
++import WorkApiSetup from './components/WorkApiSetup';
+ 
+ import './assets/fonts/roboto.css';
+ import './styles/index.scss';
+@@ -103,8 +105,10 @@ async function init() {
+   requestMutation(() => {
+     updateWebmanifest();
+ 
++    resetWorkApiCredentialsIfRequested();
++
+     TeactDOM.render(
+-      <App />,
++      loadWorkApiCredentials() ? <App /> : <WorkApiSetup />,
+       document.getElementById('root')!,
+     );
+ 
 diff --git a/src/serviceWorker/pushNotification.ts b/src/serviceWorker/pushNotification.ts
 index 09b9649..0c6876c 100644
 --- a/src/serviceWorker/pushNotification.ts
@@ -3586,6 +3855,62 @@ index 751ee39..ee291e3 100644
      return false;
    }
    // On touch devices show notifications when chat is not active
+diff --git a/src/util/workApiCredentials.ts b/src/util/workApiCredentials.ts
+new file mode 100644
+index 0000000..0915ab7
+--- /dev/null
++++ b/src/util/workApiCredentials.ts
+@@ -0,0 +1,50 @@
++// Work mode: Telegram API credentials are entered on each device and stay in its local storage,
++// so they are never part of the published build
++const STORAGE_KEY = 'tt-work-api-credentials';
++const RESET_QUERY = 'reset-keys';
++const API_ID_REGEX = /^\d{3,12}$/;
++const API_HASH_REGEX = /^[0-9a-f]{32}$/i;
++
++export type WorkApiCredentials = {
++  apiId: number;
++  apiHash: string;
++};
++
++export function loadWorkApiCredentials(): WorkApiCredentials | undefined {
++  try {
++    const value = localStorage.getItem(STORAGE_KEY);
++    if (!value) return undefined;
++
++    const { apiId, apiHash } = JSON.parse(value) as Partial<WorkApiCredentials>;
++    return parseWorkApiCredentials(String(apiId), String(apiHash));
++  } catch {
++    return undefined;
++  }
++}
++
++export function saveWorkApiCredentials(credentials: WorkApiCredentials) {
++  localStorage.setItem(STORAGE_KEY, JSON.stringify(credentials));
++}
++
++export function parseWorkApiCredentials(apiIdText: string, apiHashText: string): WorkApiCredentials | undefined {
++  const apiId = apiIdText.trim();
++  const apiHash = apiHashText.trim();
++  if (!API_ID_REGEX.test(apiId) || !API_HASH_REGEX.test(apiHash)) return undefined;
++
++  return { apiId: Number(apiId), apiHash: apiHash.toLowerCase() };
++}
++
++// Opening the app with `?reset-keys` asks for new credentials
++export function resetWorkApiCredentialsIfRequested() {
++  const url = new URL(window.location.href);
++  if (!url.searchParams.has(RESET_QUERY)) return;
++
++  try {
++    localStorage.removeItem(STORAGE_KEY);
++  } catch {
++    // Storage can be unavailable, then there is nothing to reset
++  }
++
++  url.searchParams.delete(RESET_QUERY);
++  window.history.replaceState(window.history.state, '', url.href);
++}
 diff --git a/src/util/workChatIdsStorage.ts b/src/util/workChatIdsStorage.ts
 new file mode 100644
 index 0000000..1fb536e
@@ -3636,10 +3961,21 @@ index 0000000..96d7eed
 +  return title.trim().toLowerCase();
 +}
 diff --git a/vite.config.ts b/vite.config.ts
-index 5f21a0f..ec2b208 100644
+index 5f21a0f..c448f76 100644
 --- a/vite.config.ts
 +++ b/vite.config.ts
-@@ -194,6 +194,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
+@@ -179,10 +179,6 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
+ 
+   const shouldCollectWorkerReportBundles = bundleStatsVisualizerValue === '1' || bundleStatsValue === '1';
+ 
+-  if (appEnv !== 'test' && (!telegramApiId || !telegramApiHash)) {
+-    throw new Error('Missing required Telegram API credentials');
+-  }
+-
+   setViteEnv({
+     TG_APP_ENV: appEnv,
+     TG_APP_NAME: env.APP_NAME || '',
+@@ -194,6 +190,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
      TG_TELEGRAM_API_ID: telegramApiId,
      TG_TELEGRAM_API_HASH: telegramApiHash,
      TG_VAPID_KEY: env.VAPID_KEY || '',
